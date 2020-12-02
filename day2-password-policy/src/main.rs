@@ -9,52 +9,59 @@ fn main() {
         How many passwords are valid according to their policies?
     */
     let input = include_str!("input.txt");
-    println!("Part 1 Answer: {}", count_invalid_passwords(input))
+    println!("Part 1 Answer: {}", count_invalid_passwords(input, range_policy));
     // Incorrect, too low: 385 (missed the inclusive lower bound on policy)
     // Correct answer: 550
+
+    /* Part 2:
+        Each policy actually describes two positions in the password, where 1 means the first character, 2 means the second character, and so on.
+        (Be careful; Toboggan Corporate Policies have no concept of "index zero"!)
+        Exactly one of these positions must contain the given letter. Other occurrences of the letter are irrelevant for the purposes of policy enforcement.    
+
+        How many passwords are valid according to the new interpretation of the policies?
+    */
+    println!("Part 2 Answer: {}", count_invalid_passwords(input, position_policy))
+    // Correct answer: 634
 }
 
-fn count_invalid_passwords(input: &str) -> usize {
+fn count_invalid_passwords(input: &str, validator: impl Fn(&Policy, &str) -> bool) -> usize {
     input
         .lines()
         .map(|l| l.parse::<Entry>().unwrap())
-        .filter(|e| e.check())
+        .filter(|e| validator(&e.policy, &e.password))
         .count()
 }
 
-#[derive(Debug)]
+fn range_policy(policy: &Policy, password: &str) -> bool {
+    let mut count = 0;
+    for c in password.chars() {
+        if c == policy.letter {
+            count += 1;
+        }
+        if count > policy.n2 {
+            return false
+        }
+    }
+    count >= policy.n1
+}
+
+fn position_policy(policy: &Policy, password: &str) -> bool {
+    let pos1 = password.chars().nth(policy.n1 as usize - 1).unwrap() == policy.letter;
+    let pos2 = password.chars().nth(policy.n2 as usize - 1).unwrap() == policy.letter;
+    pos1 != pos2
+}
+
 struct Entry {
     policy: Policy,
     password: String,
 }
 
-impl Entry {
-    fn check(&self) -> bool {
-        self.policy.check(&self.password)
-    }
-}
-
-#[derive(Debug)]
 struct Policy {
-    min: u32,
-    max: u32,
+    n1: u32,
+    n2: u32,
     letter: char,
 }
 
-impl Policy {
-    fn check(&self, password: &str) -> bool {
-        let mut count = 0;
-        for c in password.chars() {
-            if c == self.letter {
-                count += 1;
-            }
-            if count > self.max {
-                return false
-            }
-        }
-        count >= self.min
-    }
-}
 
 impl FromStr for Entry {
     type Err = String;
@@ -72,8 +79,8 @@ impl FromStr for Entry {
 
         Ok(Entry {
             policy: Policy {
-                min: minmax[0],
-                max: minmax[1],
+                n1: minmax[0],
+                n2: minmax[1],
                 letter,
             },
             password: parts[2].to_string(),
@@ -91,7 +98,13 @@ mod tests {
     ";
     #[test]
     fn part1_example1() {
-        let n = count_invalid_passwords(EXAMPLE_1_INPUT);
+        let n = count_invalid_passwords(EXAMPLE_1_INPUT, range_policy);
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn part2_example1() {
+        let n = count_invalid_passwords(EXAMPLE_1_INPUT, position_policy);
+        assert_eq!(n, 1);
     }
 }
