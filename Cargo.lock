@@ -3,3 +3,7 @@
 [[package]]
 name = "day1-expense-report"
 version = "0.1.0"
+
+[[package]]
+name = "day2-password-policy"
+version = "0.1.0"
