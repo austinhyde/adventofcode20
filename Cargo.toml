@@ -3,6 +3,8 @@ members = [
   "day1-expense-report",
   "day2-password-policy",
   "day3-toboggan-trajectory",
+  # template insert here
 
   "lib",
 ]
+exclude = ["template"]
