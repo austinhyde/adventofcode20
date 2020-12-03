@@ -66,25 +66,11 @@ struct Policy {
 impl FromStr for Entry {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // 1-3 a: asdf -> "1-3", "a:", "asdf"
-        let parts = s.split_whitespace().collect::<Vec<_>>();
-
-        let minmax = parts[0]
-            .split('-')
-            .map(|s| s.parse())
-            .collect::<Result<Vec<u32>,_>>()
-            .map_err(|e| e.to_string())?;
-        
-        let letter = parts[1].chars().next().ok_or_else(|| "no letter".to_string())?;
-
-        Ok(Entry {
-            policy: Policy {
-                n1: minmax[0],
-                n2: minmax[1],
-                letter,
-            },
-            password: parts[2].to_string(),
-        })
+        use lib::parse::*;
+        let range = uint32().skip("-").then(uint32());
+        let policy = range.skip(" ").then(character()).map(|((n1, n2), letter)| Policy{n1, n2, letter});
+        let entry = policy.skip(":").skip(whitespace().repeat(Any)).then(word()).map(|(policy, password)| Entry{policy, password});
+        entry.parse_result(s).ok_or_else(||"Could not parse".to_string())
     }
 }
 

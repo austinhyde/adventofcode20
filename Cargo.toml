@@ -2,4 +2,6 @@
 members = [
   "day1-expense-report",
   "day2-password-policy",
+
+  "lib",
 ]
