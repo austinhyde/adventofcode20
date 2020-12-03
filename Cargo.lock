@@ -12,5 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "day3-toboggan-trajectory"
+version = "0.1.0"
+dependencies = [
+ "lib",
+]
+
+[[package]]
 name = "lib"
 version = "0.1.0"
