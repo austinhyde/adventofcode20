@@ -3,6 +3,7 @@ members = [
   "day1-expense-report",
   "day2-password-policy",
   "day3-toboggan-trajectory",
+  "day4-passport-processing",
   # template insert here
 
   "lib",

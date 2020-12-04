@@ -41,6 +41,10 @@ pub trait Parser<'a, T> {
         })
     }
 
+    fn map_into<U: From<T>>(self) -> BoxedParser<'a, U> where Self: Sized+'a {
+        self.map(|v| v.into())
+    }
+
     // nom calls this `a.flat_map(f)`, bodil calls this `and_then(a, f)`, haskell calls it `a >>= f`,
     // and this makes Parser a monoid in the category of endofunctors, as the kids say
     /// uses the results of this parser to make a new one.
@@ -101,40 +105,125 @@ pub trait Parser<'a, T> {
         })
     }
 
-    fn repeat(self, rep: Repetition) -> BoxedParser<'a, Vec<T>> where Self: Sized+'a {
-        let (min, max) = rep.range();
+    /// runs this parser multiple times (according to `rep`), collecting its results into a Vec
+    /// ```
+    /// use lib::parse::*;
+    /// let twice = "a".or("b").repeat(2);
+    /// assert_eq!(twice.parse("ab"), Some((vec!["a", "b"], "")));
+    /// assert_eq!(twice.parse("aaaa"), Some((vec!["a", "a"], "aa")));
+    /// assert_eq!(twice.parse("a"), None);
+    /// 
+    /// let any = "a".or("b").repeat(Any);
+    /// assert_eq!(any.parse("ab"), Some((vec!["a", "b"], "")));
+    /// assert_eq!(any.parse("abaab"), Some((vec!["a", "b", "a", "a", "b"], "")));
+    /// assert_eq!(any.parse("xyz"), Some((vec![], "xyz")));
+    /// assert_eq!(any.parse(""), Some((vec![], "")));
+    /// ```
+    fn repeat(self, rep: impl Into<Repetition> + 'a) -> BoxedParser<'a, Vec<T>> where Self: Sized+'a, T:'a {
+        self.repeat_delimited(rep, succeed)
+    }
+
+    /// consumes instances of this parser delimited by the given separator parser.
+    /// ```
+    /// use lib::parse::*;
+    /// let parser = ["foo", "bar", "baz"].repeat_delimited(Many, ",");
+    /// assert_eq!(parser.parse("foo,bar,baz"), Some((vec!["foo", "bar", "baz"], "")));
+    /// assert_eq!(parser.parse("foo,bar,baz,"), Some((vec!["foo", "bar", "baz"], ",")));
+    /// assert_eq!(parser.parse("foo,bar baz"), Some((vec!["foo", "bar"], " baz")));
+    /// assert_eq!(parser.parse("foo,dog,cat"), Some((vec!["foo"], ",dog,cat")));
+    /// assert_eq!(parser.parse("dog,cat,bird"), None);
+    /// 
+    /// let parser = ["a","b"].repeat_delimited(2, ",");
+    /// assert_eq!(parser.parse("a,b"), Some((vec!["a","b"], "")));
+    /// assert_eq!(parser.parse("a,b,a,b"), Some((vec!["a","b"], ",a,b")));
+    /// assert_eq!(parser.parse("a"), None);
+    /// assert_eq!(parser.parse("a,c"), None);
+    /// 
+    /// let parser = ["a", "b"].repeat_delimited(Any, ",");
+    /// assert_eq!(parser.parse("a,b"), Some((vec!["a","b"], "")));
+    /// assert_eq!(parser.parse("x,y"), Some((vec![], "x,y")));
+    /// 
+    /// //let parser = "x".repeat_delimited(Any, ["y", "z"]);
+    /// //assert_eq!(parser.parse("xyxzx"), Some((vec!["x", "x", "x"], "")))
+    /// ```
+    fn repeat_delimited<U>(self, rep: impl Into<Repetition> + 'a, sep: impl Parser<'a, U> + 'a) -> BoxedParser<'a, Vec<T>> where Self: Sized+'a, T:'a {
+        let rep = rep.into();
+        BoxedParser::new(move |input| {
+            let mut input = input;
+            let mut result = Vec::new();
+            let mut is_first = true;
+
+            // until we hit the minimum, we MUST match
+            for _ in 0..rep.min() {
+                if !is_first {
+                    let (_, rest) = sep.parse(input)?;
+                    input = rest;
+                }
+
+                let (val, rest) = self.parse(input)?;
+                input = rest;
+                result.push(val);
+                is_first = false;
+            }
+
+            if rep.met_or_exceeded_by(result.len()) {
+                return Some((result, input));
+            }
+
+            // keep parsing until we hit the maximum, or we no longer match
+            loop {
+                let mut i = input;
+                if !is_first {
+                    if let Some((_, rest)) = sep.parse(input) {
+                        i = rest;
+                    } else {
+                        break
+                    }
+                }
+
+                if let Some((val, rest)) = self.parse(i) {
+                    input = rest;
+                    result.push(val);
+                    is_first = false;
+                } else {
+                    break
+                }
+                if rep.met_or_exceeded_by(result.len()) {
+                    break
+                }
+            }
+            Some((result, input))
+        })
+    }
+
+    // nom calls a similar operation `many_till(a, b)`, but this doesn't return a pair
+    /// runs this parser until the other parser matches, but does not consume the second parser's input.
+    /// think of it like a non-greedy repeat(Any)
+    /// ```
+    /// use lib::parse::Parser;
+    /// let parser = "abc".up_until("end");
+    /// assert_eq!(parser.parse("abcabcend"), Some((vec!["abc", "abc"], "end")));
+    /// assert_eq!(parser.parse("abc123end"), None);
+    /// assert_eq!(parser.parse("123123end"), None);
+    /// assert_eq!(parser.parse(""), None);
+    /// assert_eq!(parser.parse("abcendefg"), Some((vec!["abc"], "endefg")));
+    /// ```
+    fn up_until<U>(self, other: impl Parser<'a, U> + 'a) -> BoxedParser<'a, Vec<T>> where Self: Sized+'a {
         BoxedParser::new(move |input| {
             let mut input = input;
             let mut result = Vec::new();
 
-            // until we hit the minimum, we MUST match
-            for _ in 0..min {
-                if let Some((val, rest)) = self.parse(input) {
-                    input = rest;
-                    result.push(val);
-                } else {
-                    return None
+            // implementation strongly influenced by nom::multi::many_till (but different, and way less verbose)
+            loop {
+                // first check the second parser, if we match, we're done
+                if let Some((_val2, _rest)) = other.parse(input) {
+                    return Some((result, input));
                 }
-            }
-
-            if let Some(max) = max {
-                if result.len() > max {
-                    return Some((result, input))
-                }
-            }
-
-            // keep parsing until we hit the maximum, or we no longer match
-            while let Some((val, rest)) = self.parse(input) {
-                input = rest;
+                // if we didn't match, run the first parser and collect its result
+                let (val, next) = self.parse(input)?;
                 result.push(val);
-                if let Some(max) = max {
-                    if result.len() >= max {
-                        break
-                    }
-                }
+                input = next;
             }
-
-            Some((result, input))
         })
     }
 }
@@ -149,13 +238,14 @@ impl<'a, T> BoxedParser<'a, T> {
     }
 }
 
+/// all BoxedParsers are Parsers
 impl<'a, T> Parser<'a, T> for BoxedParser<'a, T> {
     fn parse(&self, input: &'a str) -> Result<'a, T> {
         self.parser.parse(input)
     }
 }
 
-/// all functions of &str->Result are parsers
+/// all functions of &str->Result are Parsers
 impl<'a, T, F: Fn(&'a str)->Result<T>> Parser<'a, T> for F {
     fn parse(&self, input: &'a str) -> Result<'a, T> {
         self(input)
@@ -164,6 +254,8 @@ impl<'a, T, F: Fn(&'a str)->Result<T>> Parser<'a, T> for F {
 
 
 pub enum Repetition {
+    /// Zero times
+    Never,
     /// Zero or more times
     Any,
     /// One or more times
@@ -181,17 +273,39 @@ pub use Repetition::*;
 
 impl Repetition {
     pub fn range(&self) -> (usize, Option<usize>) {
-        match self {
-            Any => (0, None),
-            Many => (1, None),
-            Exactly(n) => (*n, Some(*n)),
-            AtLeast(n) => (*n, None),
-            AtMost(n) => (0, Some(*n)),
-            Between(min, max) => (*min, Some(*max))
+        (self.min(), self.max())
+    }
+    pub fn min(&self) -> usize {
+        match *self {
+            Never | Any | AtMost(_) => 0,
+            Many => 1,
+            Exactly(n) | AtLeast(n) | Between(n, _) => n,
+        }
+    }
+    pub fn max(&self) -> Option<usize> {
+        match *self {
+            Never => Some(0),
+            Any | Many | AtLeast(_) => None,
+            Exactly(n) | AtMost(n) | Between(_, n) => Some(n),
+        }
+    }
+    pub fn has_max(&self) -> bool {
+        self.max().is_some()
+    }
+    pub fn met_or_exceeded_by(&self, other: usize) -> bool {
+        if let Some(n) = self.max() {
+            other >= n
+        } else {
+            // there is no max, so we can never exceed
+            false
         }
     }
 }
 
+/// number literals can be used as Repetition::Exactly(n)
+impl From<usize> for Repetition {
+    fn from(n: usize) -> Self { Exactly(n) }
+}
 
 /// A Parser that matches any one single character, and returns it
 pub fn character<'a>() -> impl Parser<'a, char> {
@@ -199,17 +313,38 @@ pub fn character<'a>() -> impl Parser<'a, char> {
 }
 
 /// Creates a Parser that matches a specific string and returns it
-pub fn literal<'a>(expected: &'static str) -> impl Parser<'a, &'a str> {
-    move |input: &'a str| input
-        .get(0..expected.len())
-        .filter(|s| *s == expected)
-        .map(|s| (s, &input[expected.len()..]))
+pub fn literal<'a>(expected: impl AsRef<str>) -> impl Parser<'a, &'a str> {
+    move |input: &'a str| {
+        let expected = expected.as_ref();
+        input
+            .get(0..expected.len())
+            .filter(|s| *s == expected)
+            .map(|s| (s, &input[expected.len()..]))
+    }
 }
 
-/// all static strings are interpreted as a literal parser
+/// all static strings are interpreted as `literal("...")`
 impl<'a> Parser<'a, &'a str> for &'static str {
     fn parse(&self, input: &'a str) -> Result<'a, &'a str> {
         literal(self).parse(input)
+    }
+}
+
+// fails to match anything
+fn fail<T>(_: &str) -> Result<'_, T> {
+    None
+}
+// successfully matches zero characters
+fn succeed(input: &str) -> Result<'_, ()> {
+    Some(((), input))
+}
+
+/// slices of strings are Parsers, representing alternatives
+impl<'a> Parser<'a, &'a str> for &'a [&'a str] {
+    fn parse(&self, input: &'a str) -> Result<'a, &'a str> {
+        self.iter()
+            .fold(BoxedParser::new(fail), |acc, p| acc.or(literal(p)))
+            .parse(input)
     }
 }
 
@@ -240,6 +375,15 @@ pub fn identifier<'a>() -> impl Parser<'a, String> {
         .filter(|c| c.is_alphabetic() || *c == '_')
         .then(word())
         .map(|(c, s)| c.to_string() + &s)
+}
+
+// string runs the parser, collecting the traversed input into a string, then discarding the parser's internal result
+pub fn string<'a, T>(p: impl Parser<'a, T>) -> impl Parser<'a, String> {
+    move |input| {
+        let (_val, rest) = p.parse(input)?;
+        let consumed_len = input.len()-rest.len();
+        Some((input[0..consumed_len].to_string(), rest))
+    }
 }
 
 #[cfg(test)]
