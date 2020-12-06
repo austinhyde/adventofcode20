@@ -1,5 +1,5 @@
 [package]
-name = "day4-passport-processing"
+name = "day5-binary-boarding"
 version = "0.1.0"
 authors = ["Austin Hyde <austin109@gmail.com>"]
 edition = "2018"
