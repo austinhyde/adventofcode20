@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 fn main() {
     let input = include_str!("input.txt");
     println!("Part 1 Answer: {}", part1(input));
+    // Correct answer: 6885
     println!("Part 2 Answer: {}", part2(input));
 }
 
@@ -8,7 +11,14 @@ fn main() {
 
 */
 fn part1(input: &str) -> usize {
-    0
+    input.split("\n\n")
+        .map(|s| {
+            s.chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<HashSet<_>>()
+                .len()
+        })
+        .sum()
 }
 
 /** Part 2:
@@ -25,7 +35,7 @@ mod tests {
     #[test]
     fn part1_example1() {
         let input = include_str!("example1.txt");
-        let expected = 0;
+        let expected = 11;
         assert_eq!(expected, part1(input));
     }
 

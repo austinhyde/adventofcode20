@@ -9,3 +9,5 @@ cp -r template "$1"
 # shellcheck disable=SC1004
 sed -i '' -e 's/# template insert here/"'"$1"'",\
   # template insert here/' Cargo.toml
+
+sed -i '' -e 's/"template"/"'"$1"'"/' "$1"/Cargo.toml

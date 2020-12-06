@@ -5,6 +5,7 @@ members = [
   "day3-toboggan-trajectory",
   "day4-passport-processing",
   "day5-binary-boarding",
+  "day6-custom-customs",
   # template insert here
 
   "lib",
